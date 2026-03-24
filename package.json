@@ -1,0 +1,13 @@
+{
+  "name": "denizstagram",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Render deploy icin hazir sosyal medya uygulamasi",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
