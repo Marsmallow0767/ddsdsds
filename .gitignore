@@ -1,0 +1,9 @@
+node_modules/
+cloudflared.exe
+cloudflared.err.log
+cloudflared.out.log
+server.err.log
+server.out.log
+uploads/*
+!uploads/.gitkeep
+data/db.json
