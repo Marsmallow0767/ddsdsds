@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Denizstagram</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <section class="auth-screen" id="authScreen">
+        <div class="auth-card">
+          <p class="eyebrow">Denizstagram</p>
+          <h1>Paylas, kesfet, baglanti kur.</h1>
+          <p class="auth-copy">
+            Hikayeler, akis, reels, mesajlar, bildirimler ve profil sekmeleri olan
+            kapsamli bir sosyal medya demo uygulamasi.
+          </p>
+
+          <div class="auth-tabs">
+            <button class="chip active" data-auth-mode="login">Giris</button>
+            <button class="chip" data-auth-mode="register">Kayit Ol</button>
+          </div>
+
+          <form id="authForm" class="auth-form">
+            <label>
+              Kullanici adi
+              <input type="text" id="usernameInput" placeholder="denizhan07" required />
+            </label>
+            <label id="nameField" class="hidden">
+              Ad soyad
+              <input type="text" id="displayNameInput" placeholder="Deniz Han" />
+            </label>
+            <label>
+              Sifre
+              <input type="password" id="passwordInput" placeholder="********" required />
+            </label>
+            <button type="submit" class="primary-button" id="authSubmitButton">Giris yap</button>
+          </form>
+          <p class="auth-footnote" id="authHint">
+            Demo hesabi acmak icin bir kullanici adi ve sifre yazman yeterli.
+          </p>
+        </div>
+      </section>
+
+      <section class="mobile-frame hidden" id="appScreen">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Denizstagram</p>
+            <h2 id="screenTitle">Ana Sayfa</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost-button" id="openNotificationsButton">Bildirimler</button>
+            <button class="ghost-button" id="openMessagesButton">Mesajlar</button>
+            <button class="ghost-button" id="logoutButton">Cikis</button>
+          </div>
+        </header>
+
+        <main class="screen-content">
+          <section class="view active" data-view="home">
+            <div class="stories-row" id="storiesRow"></div>
+            <div class="composer-card">
+              <div class="avatar gradient-avatar" id="composerAvatar">D</div>
+              <div>
+                <strong id="composerHandle">@deniz.user</strong>
+                <p>Bugun neler oluyor?</p>
+              </div>
+              <button class="primary-button small" data-open-compose>Paylas</button>
+            </div>
+            <div id="feedList" class="feed-list"></div>
+          </section>
+
+          <section class="view" data-view="explore">
+            <div class="section-header">
+              <h3>Kesfet</h3>
+              <p>Trend kareler ve populer hesaplar</p>
+            </div>
+            <div id="exploreGrid" class="explore-grid"></div>
+          </section>
+
+          <section class="view" data-view="reels">
+            <div id="reelsList" class="reels-list"></div>
+          </section>
+
+          <section class="view" data-view="create">
+            <div class="compose-panel">
+              <div class="compose-tabs">
+                <button class="chip active" data-compose-type="post">Gonderi</button>
+                <button class="chip" data-compose-type="reel">Reel</button>
+                <button class="chip" data-compose-type="story">Hikaye</button>
+              </div>
+              <form id="composeForm" class="compose-form">
+                <label>
+                  Baslik
+                  <input type="text" id="composeTitle" placeholder="Kisa bir baslik" required />
+                </label>
+                <label>
+                  Aciklama
+                  <textarea id="composeCaption" rows="4" placeholder="Bir seyler yaz..."></textarea>
+                </label>
+                <label>
+                  Dosya yukle
+                  <input type="file" id="composeFile" accept="image/*,video/*" />
+                </label>
+                <label>
+                  Gorsel veya video baglantisi
+                  <input
+                    type="url"
+                    id="composeMedia"
+                    placeholder="https://..."
+                  />
+                </label>
+                <button type="submit" class="primary-button">Paylasimi yayinla</button>
+              </form>
+            </div>
+          </section>
+
+          <section class="view" data-view="notifications">
+            <div class="section-header">
+              <h3>Bildirimler</h3>
+              <p>Son etkileşimler ve yeni hareketler</p>
+            </div>
+            <div id="notificationList" class="stack-list"></div>
+          </section>
+
+          <section class="view" data-view="messages">
+            <div class="messages-layout">
+              <aside class="message-list" id="messageList"></aside>
+              <section class="chat-panel">
+                <div class="chat-header">
+                  <div class="avatar gradient-avatar small" id="chatAvatar">A</div>
+                  <div>
+                    <strong id="chatTitle">atlas</strong>
+                    <p id="chatSubtitle">Cevrim ici</p>
+                  </div>
+                </div>
+                <div class="chat-thread" id="chatThread"></div>
+                <form id="messageForm" class="message-form">
+                  <input type="text" id="messageInput" placeholder="Mesaj yaz..." required />
+                  <button type="submit" class="primary-button small">Gonder</button>
+                </form>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" data-view="profile">
+            <div class="profile-header">
+              <div class="profile-avatar gradient-avatar" id="profileInitial">D</div>
+              <div>
+                <h3 id="profileName">@deniz.user</h3>
+                <p id="profileBio">Gunluk kareler, kisa videolar ve kesif anlari.</p>
+              </div>
+            </div>
+            <div class="profile-stats">
+              <div><strong id="postCount">0</strong><span>Gonderi</span></div>
+              <div><strong id="followerCount">0</strong><span>Takipci</span></div>
+              <div><strong id="followingCount">0</strong><span>Takip</span></div>
+            </div>
+            <div class="profile-actions">
+              <button class="ghost-button fill" data-target="settings">Profili Duzenle</button>
+              <button class="ghost-button fill">Profili Paylas</button>
+            </div>
+            <div class="profile-tabs">
+              <button class="chip active" data-profile-tab="posts">Gonderiler</button>
+              <button class="chip" data-profile-tab="reels">Reels</button>
+              <button class="chip" data-profile-tab="tagged">Etiketlenenler</button>
+            </div>
+            <div id="profileTabContent" class="profile-tab-content"></div>
+          </section>
+
+          <section class="view" data-view="settings">
+            <div class="compose-panel">
+              <div class="section-header">
+                <h3>Hesap Ayarlari</h3>
+                <p>Profil bilgilerini duzenle</p>
+              </div>
+              <form id="settingsForm" class="compose-form">
+                <label>
+                  Gorunen ad
+                  <input type="text" id="settingsDisplayName" required />
+                </label>
+                <label>
+                  Biyografi
+                  <textarea id="settingsBio" rows="4"></textarea>
+                </label>
+                <label>
+                  Profil fotografi baglantisi
+                  <input type="url" id="settingsAvatar" placeholder="https://..." />
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="settingsPrivate" />
+                  <span>Gizli hesap modu</span>
+                </label>
+                <button type="submit" class="primary-button">Kaydet</button>
+              </form>
+            </div>
+          </section>
+        </main>
+
+        <nav class="bottom-nav">
+          <button class="nav-item active" data-target="home">Ana</button>
+          <button class="nav-item" data-target="explore">Kesfet</button>
+          <button class="nav-item" data-target="reels">Reels</button>
+          <button class="nav-item" data-target="create">Olustur</button>
+          <button class="nav-item" data-target="profile">Profil</button>
+        </nav>
+      </section>
+    </div>
+
+    <div class="story-modal hidden" id="storyModal">
+      <div class="story-modal-card">
+        <button class="story-close ghost-button" id="closeStoryButton">Kapat</button>
+        <div class="story-progress"></div>
+        <img id="storyModalImage" class="story-modal-image" alt="" />
+        <div class="story-modal-meta">
+          <strong id="storyModalTitle">@story</strong>
+          <p id="storyModalCaption">Hikaye izleniyor</p>
+        </div>
+      </div>
+    </div>
+
+    <template id="feedCardTemplate">
+      <article class="feed-card">
+        <div class="feed-header">
+          <div class="avatar gradient-avatar small feed-avatar"></div>
+          <div>
+            <strong class="post-author"></strong>
+            <p class="post-meta"></p>
+          </div>
+        </div>
+        <div class="media-frame">
+          <img class="post-image" alt="" />
+        </div>
+        <div class="feed-actions">
+          <button class="like-button">Begeni</button>
+          <button class="comment-toggle-button">Yorum</button>
+          <button class="share-button">Paylas</button>
+          <button class="save-button">Kaydet</button>
+        </div>
+        <strong class="like-count"></strong>
+        <h4 class="post-title"></h4>
+        <p class="post-caption"></p>
+        <p class="post-comments-summary"></p>
+        <div class="comments-panel hidden">
+          <div class="comment-list"></div>
+          <form class="comment-form">
+            <input class="comment-input" type="text" placeholder="Yorum ekle..." required />
+            <button type="submit" class="ghost-button">Gonder</button>
+          </form>
+        </div>
+      </article>
+    </template>
+
+    <template id="reelCardTemplate">
+      <article class="reel-card">
+        <img class="reel-image" alt="" />
+        <div class="reel-overlay">
+          <div>
+            <strong class="reel-author"></strong>
+            <p class="reel-caption"></p>
+            <p class="reel-comments-summary"></p>
+            <div class="reel-comments-panel hidden">
+              <div class="reel-comment-list"></div>
+              <form class="reel-comment-form">
+                <input class="reel-comment-input" type="text" placeholder="Reel yorumu ekle..." required />
+                <button type="submit" class="ghost-button">Gonder</button>
+              </form>
+            </div>
+          </div>
+          <div class="reel-metrics">
+            <button class="reel-like-button ghost-button">Begeni</button>
+            <button class="reel-comment-button ghost-button">Yorum</button>
+            <span class="reel-likes"></span>
+            <span class="reel-views"></span>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
