@@ -5,7 +5,10 @@ const state = {
   data: null,
   viewedReels: new Set(),
   exploreQuery: "",
-  interestTerms: []
+  interestTerms: [],
+  authChallenge: null,
+  authChallengeStartedAt: Date.now(),
+  pendingEmailVerification: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -15,10 +18,22 @@ const els = {
   authForm: $("authForm"),
   usernameInput: $("usernameInput"),
   displayNameInput: $("displayNameInput"),
+  emailInput: $("emailInput"),
+  emailCodeInput: $("emailCodeInput"),
+  sendEmailCodeButton: $("sendEmailCodeButton"),
+  emailVerificationHint: $("emailVerificationHint"),
   passwordInput: $("passwordInput"),
+  authChallengeLabel: $("authChallengeLabel"),
+  authChallengeInput: $("authChallengeInput"),
+  authCaptchaImage: $("authCaptchaImage"),
+  refreshCaptchaButton: $("refreshCaptchaButton"),
+  authRobotCheckbox: $("authRobotCheckbox"),
+  authWebsiteInput: $("authWebsiteInput"),
   authSubmitButton: $("authSubmitButton"),
   authHint: $("authHint"),
   nameField: $("nameField"),
+  emailField: $("emailField"),
+  emailVerificationBlock: $("emailVerificationBlock"),
   screenTitle: $("screenTitle"),
   storiesRow: $("storiesRow"),
   composerHandle: $("composerHandle"),
@@ -106,6 +121,43 @@ function avatarMarkup(accountOrName) {
 
 function empty(message) {
   return `<div class="empty-state">${message}</div>`;
+}
+
+function authErrorMessage(code) {
+  return (
+    {
+      invalid_input: "Kullanici adi, sifre ve dogrulama zorunlu.",
+      invalid_credentials: "Kullanici adi veya sifre hatali.",
+      username_taken: "Bu kullanici adi zaten kullaniliyor.",
+      email_required: "Kayit icin e-posta zorunlu.",
+      email_verification_required: "Kayit olmadan once mail kodunu dogrula.",
+      email_verification_invalid: "Mail dogrulama kodu hatali.",
+      email_service_unavailable: "Mail gonderim servisi ayarlanmadigi icin kod gonderilemedi.",
+      captcha_required: "Captcha zorunlu.",
+      captcha_invalid: "Captcha kodu hatali.",
+      captcha_expired: "Captcha suresi doldu. Yenile.",
+      human_check_required: "Robot olmadigini onaylaman gerekiyor.",
+      human_check_too_fast: "Form cok hizli gonderildi. Tekrar dene.",
+      bot_detected: "Bot benzeri istek algilandi."
+    }[code] || code
+  );
+}
+
+async function resetAuthChallenge() {
+  state.authChallengeStartedAt = Date.now();
+  if (els.authChallengeLabel) els.authChallengeLabel.textContent = "Captcha yukleniyor...";
+  if (els.authChallengeInput) els.authChallengeInput.value = "";
+  if (els.authRobotCheckbox) els.authRobotCheckbox.checked = false;
+  if (els.authWebsiteInput) els.authWebsiteInput.value = "";
+  try {
+    const captcha = await api("/api/auth/captcha", { method: "GET", headers: {} });
+    state.authChallenge = captcha;
+    if (els.authCaptchaImage) els.authCaptchaImage.src = captcha.image;
+    if (els.authChallengeLabel) els.authChallengeLabel.textContent = "Captcha kodu";
+  } catch {
+    state.authChallenge = null;
+    if (els.authChallengeLabel) els.authChallengeLabel.textContent = "Captcha yuklenemedi";
+  }
 }
 
 function loadInterestTerms() {
@@ -323,13 +375,21 @@ function setView(viewName) {
 function applyAuthMode() {
   const registerMode = state.authMode === "register";
   els.nameField.classList.toggle("hidden", !registerMode);
+  els.emailField.classList.toggle("hidden", !registerMode);
+  els.emailVerificationBlock.classList.toggle("hidden", !registerMode);
   els.authSubmitButton.textContent = registerMode ? "Kayit ol" : "Giris yap";
   els.authHint.textContent = registerMode
-    ? "Yeni hesaplar sunucu tarafinda kaydedilir."
-    : "Kayit oldugun hesapla giris yap.";
+    ? "Kayit icin mail dogrulamasi ve captcha zorunlu."
+    : "Giris icin dogrulamayi tamamla.";
   document.querySelectorAll("[data-auth-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.authMode === state.authMode);
   });
+  state.pendingEmailVerification = null;
+  if (els.emailCodeInput) els.emailCodeInput.value = "";
+  if (els.emailVerificationHint) {
+    els.emailVerificationHint.textContent = "Kayit olmadan once mail kodu gonderilmelidir.";
+  }
+  resetAuthChallenge();
 }
 
 function renderStories() {
@@ -760,7 +820,16 @@ els.authForm.addEventListener("submit", async (event) => {
   const body = {
     username: els.usernameInput.value.trim().toLowerCase(),
     displayName: els.displayNameInput.value.trim(),
-    password: els.passwordInput.value.trim()
+    email: els.emailInput.value.trim().toLowerCase(),
+    password: els.passwordInput.value.trim(),
+    emailCode: els.emailCodeInput?.value.trim(),
+    emailVerificationToken: state.pendingEmailVerification?.token || "",
+    captchaInput: els.authChallengeInput.value.trim(),
+    captchaToken: state.authChallenge?.token || "",
+    captchaSignature: state.authChallenge?.signature || "",
+    notRobot: Boolean(els.authRobotCheckbox.checked),
+    website: els.authWebsiteInput.value.trim(),
+    humanDelayMs: Date.now() - state.authChallengeStartedAt
   };
   try {
     if (state.authMode === "register") {
@@ -771,7 +840,33 @@ els.authForm.addEventListener("submit", async (event) => {
     }
     await bootstrap();
   } catch (error) {
-    els.authHint.textContent = error.message;
+    els.authHint.textContent = authErrorMessage(error.message);
+    resetAuthChallenge();
+  }
+});
+
+els.sendEmailCodeButton?.addEventListener("click", async () => {
+  const body = {
+    email: els.emailInput.value.trim().toLowerCase(),
+    captchaInput: els.authChallengeInput.value.trim(),
+    captchaToken: state.authChallenge?.token || "",
+    captchaSignature: state.authChallenge?.signature || "",
+    notRobot: Boolean(els.authRobotCheckbox.checked),
+    website: els.authWebsiteInput.value.trim(),
+    humanDelayMs: Date.now() - state.authChallengeStartedAt
+  };
+  try {
+    const result = await api("/api/auth/send-email-code", { method: "POST", body: JSON.stringify(body) });
+    state.pendingEmailVerification = {
+      token: result.verificationToken,
+      email: body.email
+    };
+    els.emailVerificationHint.textContent = `Kod gonderildi: ${body.email}`;
+    els.authHint.textContent = "Mail kodunu girip kayit islemini tamamla.";
+    resetAuthChallenge();
+  } catch (error) {
+    els.emailVerificationHint.textContent = authErrorMessage(error.message);
+    resetAuthChallenge();
   }
 });
 
@@ -873,6 +968,9 @@ document.querySelectorAll("[data-profile-tab]").forEach((button) => {
 document.querySelectorAll("[data-target='settings']").forEach((button) => {
   button.addEventListener("click", () => setView("settings"));
 });
+els.refreshCaptchaButton?.addEventListener("click", () => {
+  resetAuthChallenge();
+});
 
 applyAuthMode();
 bootstrap();
@@ -900,3 +998,4 @@ els.exploreSearchInput?.addEventListener("input", (event) => {
   renderExplore();
 });
 syncEditorPreview();
+resetAuthChallenge();
