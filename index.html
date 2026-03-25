@@ -73,7 +73,30 @@
           <section class="view" data-view="explore">
             <div class="section-header">
               <h3>Kesfet</h3>
-              <p>Trend kareler ve populer hesaplar</p>
+              <p>Ilgi alanlarina gore siralanan videolar ve ayri takip onerileri</p>
+            </div>
+            <div class="explore-search-card">
+              <label>
+                Kesfet aramasi
+                <input type="search" id="exploreSearchInput" placeholder="Muzik, konu, mekan veya kisi ara" />
+              </label>
+              <p class="search-hint">Yazdiklarin sonraki videolari etkileyecek.</p>
+            </div>
+            <div class="section-header compact">
+              <h3>Sana Ozel Videolar</h3>
+              <p>Aramalarin, etkilesimlerin ve paylasimlarina gore</p>
+            </div>
+            <div id="exploreReelsGrid" class="explore-reels-grid"></div>
+            <div class="friend-map-card">
+              <div class="section-header compact">
+                <h3>Arkadas Haritasi</h3>
+                <p>Arkadaslarinin son paylasim konumlari</p>
+              </div>
+              <div id="friendMap" class="friend-map"></div>
+            </div>
+            <div class="section-header compact">
+              <h3>Takip Onerileri</h3>
+              <p>Kesfet algoritmasindan ayri hesap onerileri</p>
             </div>
             <div id="exploreGrid" class="explore-grid"></div>
           </section>
@@ -89,6 +112,17 @@
                 <button class="chip" data-compose-type="reel">Reel</button>
                 <button class="chip" data-compose-type="story">Hikaye</button>
               </div>
+              <div class="editor-shell">
+                <div class="editor-preview">
+                  <div class="editor-preview-frame" id="editorPreviewFrame">
+                    <img id="editorPreviewImage" class="editor-preview-image hidden" alt="" />
+                    <video id="editorPreviewVideo" class="editor-preview-video hidden" muted loop playsinline></video>
+                    <div class="editor-preview-overlay">
+                      <strong id="editorPreviewTitle">Onizleme</strong>
+                      <span id="editorPreviewMeta">Reel editoru hazir</span>
+                    </div>
+                  </div>
+                </div>
               <form id="composeForm" class="compose-form">
                 <label>
                   Baslik
@@ -110,8 +144,75 @@
                     placeholder="https://..."
                   />
                 </label>
+                <div class="reel-editor-panel" id="reelEditorPanel">
+                  <div class="section-header compact">
+                    <h3>Reel Editoru</h3>
+                    <p>Kapak, filtre ve metin ayarlari</p>
+                  </div>
+                  <label>
+                    Muzik adi
+                    <input type="text" id="reelMusic" placeholder="Parca veya ses adi" />
+                  </label>
+                  <label>
+                    Konum
+                    <input type="text" id="reelLocation" placeholder="Istanbul, Turkiye" />
+                  </label>
+                  <label>
+                    Kapak yazi
+                    <input type="text" id="reelCoverText" placeholder="Kapakta gosterilecek yazi" />
+                  </label>
+                  <div class="editor-grid">
+                    <label>
+                      Filtre
+                      <select id="reelFilter">
+                        <option value="none">Dogal</option>
+                        <option value="warm">Warm</option>
+                        <option value="mono">Mono</option>
+                        <option value="cinema">Cinema</option>
+                      </select>
+                    </label>
+                    <label>
+                      Parlaklik
+                      <input type="range" id="reelBrightness" min="60" max="140" value="100" />
+                    </label>
+                    <label>
+                      Kontrast
+                      <input type="range" id="reelContrast" min="60" max="160" value="100" />
+                    </label>
+                    <label>
+                      Doygunluk
+                      <input type="range" id="reelSaturation" min="0" max="180" value="100" />
+                    </label>
+                  </div>
+                  <div class="editor-grid">
+                    <label>
+                      Baslangic sn
+                      <input type="number" id="reelTrimStart" min="0" value="0" />
+                    </label>
+                    <label>
+                      Bitis sn
+                      <input type="number" id="reelTrimEnd" min="1" value="15" />
+                    </label>
+                  </div>
+                  <div class="editor-grid">
+                    <label>
+                      Ses modu
+                      <select id="reelVoiceMode">
+                        <option value="original">Orijinal</option>
+                        <option value="cinematic">Cinematic</option>
+                        <option value="deep">Deep</option>
+                        <option value="helium">Helium</option>
+                      </select>
+                    </label>
+                    <label>
+                      Oynatma hizi
+                      <input type="range" id="reelSpeed" min="50" max="150" value="100" />
+                    </label>
+                  </div>
+                </div>
                 <button type="submit" class="primary-button">Paylasimi yayinla</button>
               </form>
+              </div>
             </div>
           </section>
 
@@ -187,6 +288,10 @@
                   Profil fotografi baglantisi
                   <input type="url" id="settingsAvatar" placeholder="https://..." />
                 </label>
+                <label>
+                  Galeriden profil fotografi sec
+                  <input type="file" id="settingsAvatarFile" accept="image/*" />
+                </label>
                 <label class="toggle-row">
                   <input type="checkbox" id="settingsPrivate" />
                   <span>Gizli hesap modu</span>
@@ -236,6 +341,7 @@
           <button class="comment-toggle-button">Yorum</button>
           <button class="share-button">Paylas</button>
           <button class="save-button">Kaydet</button>
+          <button class="delete-button hidden">Sil</button>
         </div>
         <strong class="like-count"></strong>
         <h4 class="post-title"></h4>
@@ -253,11 +359,12 @@
 
     <template id="reelCardTemplate">
       <article class="reel-card">
-        <img class="reel-image" alt="" />
+        <div class="reel-media"></div>
         <div class="reel-overlay">
           <div>
             <strong class="reel-author"></strong>
             <p class="reel-caption"></p>
+            <p class="reel-meta"></p>
             <p class="reel-comments-summary"></p>
             <div class="reel-comments-panel hidden">
               <div class="reel-comment-list"></div>
@@ -270,8 +377,12 @@
           <div class="reel-metrics">
             <button class="reel-like-button ghost-button">Begeni</button>
             <button class="reel-comment-button ghost-button">Yorum</button>
+            <button class="reel-share-button ghost-button">Gonder</button>
+            <button class="reel-audio-button ghost-button">Ses</button>
             <span class="reel-likes"></span>
             <span class="reel-views"></span>
+            <span class="reel-shares"></span>
+            <span class="reel-completion"></span>
           </div>
         </div>
       </article>
