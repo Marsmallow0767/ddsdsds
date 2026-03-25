@@ -131,6 +131,59 @@ p {
   color: var(--muted);
 }
 
+.auth-checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.auth-captcha-block {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-captcha-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-captcha-image {
+  width: 180px;
+  height: 64px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: white;
+  object-fit: cover;
+}
+
+.email-verification-block {
+  display: grid;
+  gap: 8px;
+}
+
+.email-verification-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-checkbox input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.bot-trap {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 input,
 textarea {
   width: 100%;
