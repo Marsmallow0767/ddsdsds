@@ -55,6 +55,7 @@ function publicUser(user) {
     displayName: user.displayName,
     bio: user.bio,
     avatar: user.avatar,
+    lastLocation: user.lastLocation || "",
     privateAccount: Boolean(user.privateAccount),
     followers: user.followers || [],
     following: user.following || [],
@@ -278,8 +279,16 @@ async function handleApi(req, res, pathname) {
         media,
         likedBy: [],
         views: 0,
-        comments: []
+        comments: [],
+        music: body.music || "",
+        location: body.location || "",
+        coverText: body.coverText || "",
+        settings: body.reelSettings || {},
+        shares: 0,
+        watchTime: 0,
+        completionRate: 0
       });
+      viewer.lastLocation = body.location || viewer.lastLocation || "";
     } else if (body.type === "story") {
       db.stories = db.stories.filter((story) => !(story.owner === viewer.username && story.placeholder));
       db.stories.unshift({
@@ -377,6 +386,16 @@ async function handleApi(req, res, pathname) {
     return sendJson(res, 200, buildBootstrap(db, viewer));
   }
 
+  if (pathname === "/api/post/delete" && req.method === "POST") {
+    const body = await readBody(req);
+    const post = db.posts.find((item) => item.id === body.id);
+    if (!post) return sendJson(res, 404, { error: "not_found" });
+    if (post.author !== viewer.username) return sendJson(res, 403, { error: "forbidden" });
+    db.posts = db.posts.filter((item) => item.id !== body.id);
+    await saveDb(db);
+    return sendJson(res, 200, buildBootstrap(db, viewer));
+  }
+
   if (pathname === "/api/reel/like" && req.method === "POST") {
     const body = await readBody(req);
     const reel = db.reels.find((item) => item.id === body.id);
@@ -402,6 +421,18 @@ async function handleApi(req, res, pathname) {
     return sendJson(res, 200, buildBootstrap(db, viewer));
   }
 
+  if (pathname === "/api/reel/view" && req.method === "POST") {
+    const body = await readBody(req);
+    const reel = db.reels.find((item) => item.id === body.id);
+    if (!reel) return sendJson(res, 404, { error: "not_found" });
+    reel.views = Number(reel.views || 0) + 1;
+    reel.watchTime = Number(reel.watchTime || 0) + Number(body.watchTime || 3);
+    const completion = Math.max(0, Math.min(100, Number(body.completionRate || 0)));
+    reel.completionRate = Math.round(((Number(reel.completionRate || 0) + completion) / 2) || completion);
+    await saveDb(db);
+    return sendJson(res, 200, buildBootstrap(db, viewer));
+  }
+
   if (pathname === "/api/messages" && req.method === "POST") {
     const body = await readBody(req);
     const target = findUser(db, body.username);
@@ -415,6 +446,10 @@ async function handleApi(req, res, pathname) {
         time: "Simdi"
       });
       addNotification(db, target.username, viewer.username, "sana mesaj gonderdi.");
+      if (body.reelId) {
+        const reel = db.reels.find((item) => item.id === body.reelId);
+        if (reel) reel.shares = Number(reel.shares || 0) + 1;
+      }
     }
     await saveDb(db);
     return sendJson(res, 200, buildBootstrap(db, viewer));
@@ -422,9 +457,11 @@ async function handleApi(req, res, pathname) {
 
   if (pathname === "/api/profile" && req.method === "POST") {
     const body = await readBody(req);
+    const uploadedAvatar = await saveUpload(body);
     viewer.displayName = body.displayName || viewer.displayName;
     viewer.bio = body.bio || "";
-    viewer.avatar = body.avatar || "";
+    viewer.avatar = uploadedAvatar || body.avatar || "";
+    viewer.lastLocation = body.lastLocation || viewer.lastLocation || "";
     viewer.privateAccount = Boolean(body.privateAccount);
     await saveDb(db);
     return sendJson(res, 200, buildBootstrap(db, viewer));
