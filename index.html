@@ -31,10 +31,41 @@
               Ad soyad
               <input type="text" id="displayNameInput" placeholder="Deniz Han" />
             </label>
+            <label id="emailField" class="hidden">
+              E-posta
+              <input type="email" id="emailInput" placeholder="ornek@mail.com" />
+            </label>
             <label>
               Sifre
               <input type="password" id="passwordInput" placeholder="********" required />
             </label>
+            <div class="auth-captcha-block">
+              <div class="auth-captcha-row">
+                <img id="authCaptchaImage" class="auth-captcha-image" alt="Captcha dogrulama gorseli" />
+                <button type="button" class="ghost-button" id="refreshCaptchaButton">Yenile</button>
+              </div>
+              <label class="auth-challenge-field">
+                <span id="authChallengeLabel">Captcha kodu</span>
+                <input type="text" id="authChallengeInput" placeholder="Resimdeki kodu yaz" required />
+              </label>
+            </div>
+            <label class="auth-checkbox">
+              <input type="checkbox" id="authRobotCheckbox" required />
+              <span>Robot olmadigimi dogruluyorum</span>
+            </label>
+            <div id="emailVerificationBlock" class="email-verification-block hidden">
+              <div class="email-verification-row">
+                <input type="text" id="emailCodeInput" placeholder="Mail kodu" />
+                <button type="button" class="ghost-button" id="sendEmailCodeButton">Kodu Gonder</button>
+              </div>
+              <p class="search-hint" id="emailVerificationHint">Kayit olmadan once mail kodu gonderilmelidir.</p>
+            </div>
+            <div class="bot-trap" aria-hidden="true">
+              <label>
+                Website
+                <input type="text" id="authWebsiteInput" tabindex="-1" autocomplete="off" />
+              </label>
+            </div>
             <button type="submit" class="primary-button" id="authSubmitButton">Giris yap</button>
           </form>
           <p class="auth-footnote" id="authHint">
