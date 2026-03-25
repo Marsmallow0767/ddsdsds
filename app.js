@@ -2,7 +2,10 @@ const state = {
   authMode: "login",
   composeType: "post",
   profileTab: "posts",
-  data: null
+  data: null,
+  viewedReels: new Set(),
+  exploreQuery: "",
+  interestTerms: []
 };
 
 const $ = (id) => document.getElementById(id);
@@ -23,12 +26,32 @@ const els = {
   feedList: $("feedList"),
   reelsList: $("reelsList"),
   exploreGrid: $("exploreGrid"),
+  exploreReelsGrid: $("exploreReelsGrid"),
+  exploreSearchInput: $("exploreSearchInput"),
+  friendMap: $("friendMap"),
   notificationList: $("notificationList"),
   composeForm: $("composeForm"),
   composeTitle: $("composeTitle"),
   composeCaption: $("composeCaption"),
   composeMedia: $("composeMedia"),
   composeFile: $("composeFile"),
+  editorPreviewFrame: $("editorPreviewFrame"),
+  editorPreviewImage: $("editorPreviewImage"),
+  editorPreviewVideo: $("editorPreviewVideo"),
+  editorPreviewTitle: $("editorPreviewTitle"),
+  editorPreviewMeta: $("editorPreviewMeta"),
+  reelEditorPanel: $("reelEditorPanel"),
+  reelMusic: $("reelMusic"),
+  reelLocation: $("reelLocation"),
+  reelCoverText: $("reelCoverText"),
+  reelFilter: $("reelFilter"),
+  reelBrightness: $("reelBrightness"),
+  reelContrast: $("reelContrast"),
+  reelSaturation: $("reelSaturation"),
+  reelTrimStart: $("reelTrimStart"),
+  reelTrimEnd: $("reelTrimEnd"),
+  reelVoiceMode: $("reelVoiceMode"),
+  reelSpeed: $("reelSpeed"),
   profileName: $("profileName"),
   profileInitial: $("profileInitial"),
   profileBio: $("profileBio"),
@@ -50,6 +73,7 @@ const els = {
   settingsDisplayName: $("settingsDisplayName"),
   settingsBio: $("settingsBio"),
   settingsAvatar: $("settingsAvatar"),
+  settingsAvatarFile: $("settingsAvatarFile"),
   settingsPrivate: $("settingsPrivate"),
   storyModal: $("storyModal"),
   storyModalImage: $("storyModalImage"),
@@ -82,6 +106,156 @@ function avatarMarkup(accountOrName) {
 
 function empty(message) {
   return `<div class="empty-state">${message}</div>`;
+}
+
+function loadInterestTerms() {
+  try {
+    return JSON.parse(localStorage.getItem("denizstagram_interest_terms") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveInterestTerm(term) {
+  const normalized = `${term || ""}`.trim().toLowerCase();
+  if (!normalized) return;
+  const next = [normalized, ...state.interestTerms.filter((item) => item !== normalized)].slice(0, 12);
+  state.interestTerms = next;
+  localStorage.setItem("denizstagram_interest_terms", JSON.stringify(next));
+}
+
+function buildInterestProfile() {
+  const account = me();
+  const ownPosts = (state.data?.posts || []).filter((post) => post.author === account?.username);
+  const ownReels = (state.data?.reels || []).filter((reel) => reel.author === account?.username);
+  const terms = [
+    ...(state.interestTerms || []),
+    ...(account?.following || []),
+    account?.bio || "",
+    ...ownPosts.flatMap((post) => [post.title, post.caption]),
+    ...ownReels.flatMap((reel) => [reel.caption, reel.music, reel.location, reel.coverText])
+  ]
+    .join(" ")
+    .toLowerCase()
+    .match(/[a-z0-9#@_-]{3,}/gi);
+  return new Set(terms || []);
+}
+
+function linkifyText(text = "") {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+}
+
+function isVideoMedia(src = "") {
+  return /(\.mp4|\.webm|\.ogg|data:video\/)/i.test(src);
+}
+
+function buildFilterStyle(settings = {}) {
+  const preset =
+    {
+      none: "",
+      warm: "sepia(0.18) hue-rotate(-8deg)",
+      mono: "grayscale(1)",
+      cinema: "contrast(1.08) saturate(1.12) hue-rotate(4deg)"
+    }[settings.filter || "none"] || "";
+  return [
+    `brightness(${Number(settings.brightness || 100)}%)`,
+    `contrast(${Number(settings.contrast || 100)}%)`,
+    `saturate(${Number(settings.saturation || 100)}%)`,
+    preset
+  ].join(" ");
+}
+
+function voiceModeStyle(mode = "original") {
+  return {
+    original: { rate: 1, label: "Orijinal ses" },
+    cinematic: { rate: 0.92, label: "Cinematic ses" },
+    deep: { rate: 0.82, label: "Deep voice" },
+    helium: { rate: 1.18, label: "Helium voice" }
+  }[mode] || { rate: 1, label: "Orijinal ses" };
+}
+
+function createMediaMarkup(src, alt, className, settings = {}) {
+  const style = buildFilterStyle(settings);
+  if (isVideoMedia(src)) {
+    return `<video class="${className}" src="${src}" playsinline muted loop autoplay preload="metadata" style="filter:${style}"></video>`;
+  }
+  return `<img class="${className}" src="${src}" alt="${alt}" style="filter:${style}" />`;
+}
+
+function syncEditorPreview() {
+  if (!els.editorPreviewFrame) return;
+  const file = els.composeFile.files[0];
+  const mediaUrl = els.composeMedia.value.trim();
+  const settings = {
+    filter: els.reelFilter.value,
+    brightness: els.reelBrightness.value,
+    contrast: els.reelContrast.value,
+    saturation: els.reelSaturation.value
+  };
+  els.reelEditorPanel.classList.toggle("active", state.composeType === "reel");
+  els.editorPreviewTitle.textContent = els.composeTitle.value.trim() || "Onizleme";
+  els.editorPreviewMeta.textContent =
+    state.composeType === "reel"
+      ? `${els.reelMusic.value.trim() || "Ses secilmedi"} - ${els.reelLocation.value.trim() || "Konum yok"} - ${voiceModeStyle(els.reelVoiceMode.value).label}`
+      : state.composeType === "story"
+        ? "Hikaye onizlemesi"
+        : "Gonderi onizlemesi";
+
+  const applySource = (src) => {
+    const style = buildFilterStyle(settings);
+    const video = isVideoMedia(src || "");
+    els.editorPreviewImage.classList.toggle("hidden", video);
+    els.editorPreviewVideo.classList.toggle("hidden", !video);
+    if (video) {
+      els.editorPreviewVideo.src = src || "";
+      els.editorPreviewVideo.style.filter = style;
+      els.editorPreviewVideo.currentTime = 0;
+      els.editorPreviewVideo.playbackRate = Number(els.reelSpeed.value || 100) / 100;
+      els.editorPreviewVideo.play().catch(() => {});
+    } else {
+      els.editorPreviewImage.src = src || "";
+      els.editorPreviewImage.style.filter = style;
+    }
+  };
+
+  if (file) {
+    fileToDataUrl(file).then((src) => applySource(src));
+  } else {
+    applySource(mediaUrl);
+  }
+}
+
+function matchesInterest(text, interests) {
+  const haystack = `${text || ""}`.toLowerCase();
+  return [...interests].some((term) => haystack.includes(term));
+}
+
+function scoreFeedPost(post, interests) {
+  const engagement = ((post.likedBy || []).length * 3) + ((post.comments || []).length * 4) + ((post.savedBy || []).length * 5);
+  const followBoost = (me()?.following || []).includes(post.author) ? 24 : 0;
+  const interestBoost = matchesInterest(`${post.title} ${post.caption}`, interests) ? 32 : 0;
+  return engagement + followBoost + interestBoost;
+}
+
+function scoreExploreReel(reel, interests) {
+  const engagement =
+    ((reel.likedBy || []).length * 3) +
+    ((reel.comments || []).length * 4) +
+    Number(reel.views || 0) +
+    (Number(reel.shares || 0) * 6) +
+    Math.round(Number(reel.completionRate || 0) / 4);
+  const followBoost = (me()?.following || []).includes(reel.author) ? 16 : 0;
+  const interestBoost = matchesInterest(`${reel.caption} ${reel.music} ${reel.location} ${reel.coverText}`, interests) ? 40 : 0;
+  const queryBoost =
+    state.exploreQuery &&
+    matchesInterest(`${reel.caption} ${reel.music} ${reel.location} ${reel.coverText} ${reel.author}`, new Set([state.exploreQuery]))
+      ? 60
+      : 0;
+  return engagement + followBoost + interestBoost + queryBoost;
 }
 
 function pickShareTarget(excludeUsername) {
@@ -185,7 +359,8 @@ function renderStories() {
 
 function renderFeed() {
   els.feedList.innerHTML = "";
-  const posts = [...(state.data?.posts || [])].reverse();
+  const interestProfile = buildInterestProfile();
+  const posts = [...(state.data?.posts || [])].sort((left, right) => scoreFeedPost(right, interestProfile) - scoreFeedPost(left, interestProfile));
   if (!posts.length) {
     els.feedList.innerHTML = empty("Henuz gonderi yok.");
     return;
@@ -195,10 +370,9 @@ function renderFeed() {
     node.querySelector(".feed-avatar").innerHTML = avatarMarkup(post.author);
     node.querySelector(".post-author").textContent = `@${post.author}`;
     node.querySelector(".post-meta").textContent = post.dateLabel;
-    node.querySelector(".post-image").src = post.media;
-    node.querySelector(".post-image").alt = post.title;
+    node.querySelector(".media-frame").innerHTML = createMediaMarkup(post.media, post.title, "post-image");
     node.querySelector(".post-title").textContent = post.title;
-    node.querySelector(".post-caption").textContent = post.caption;
+    node.querySelector(".post-caption").innerHTML = linkifyText(post.caption);
     node.querySelector(".like-count").textContent = `${(post.likedBy || []).length} begeni`;
     node.querySelector(".post-comments-summary").textContent =
       (post.comments || []).length > 0 ? `${post.comments.length} yorumun tumunu gor` : "Ilk yorumu sen ekle";
@@ -206,6 +380,7 @@ function renderFeed() {
     const saveButton = node.querySelector(".save-button");
     const shareButton = node.querySelector(".share-button");
     const commentButton = node.querySelector(".comment-toggle-button");
+    const deleteButton = node.querySelector(".delete-button");
     const commentsPanel = node.querySelector(".comments-panel");
     const commentList = node.querySelector(".comment-list");
     const commentForm = node.querySelector(".comment-form");
@@ -214,8 +389,9 @@ function renderFeed() {
     saveButton.classList.toggle("liked", (post.savedBy || []).includes(me().username));
     likeButton.textContent = (post.likedBy || []).includes(me().username) ? "Begenildi" : "Begeni";
     saveButton.textContent = (post.savedBy || []).includes(me().username) ? "Kaydedildi" : "Kaydet";
+    deleteButton.classList.toggle("hidden", post.author !== me().username);
     commentList.innerHTML = (post.comments || []).length
-      ? post.comments.map((comment) => `<p><strong>@${comment.author}</strong> ${comment.text}</p>`).join("")
+      ? post.comments.map((comment) => `<p><strong>@${comment.author}</strong> ${linkifyText(comment.text)}</p>`).join("")
       : empty("Henuz yorum yok.");
     likeButton.addEventListener("click", async () => mutate("/api/post/like", { id: post.id }));
     saveButton.addEventListener("click", async () => mutate("/api/post/save", { id: post.id }));
@@ -229,6 +405,10 @@ function renderFeed() {
       setView("messages");
     });
     commentButton.addEventListener("click", () => commentsPanel.classList.toggle("hidden"));
+    deleteButton.addEventListener("click", async () => {
+      if (!window.confirm("Bu gonderi silinsin mi?")) return;
+      await mutate("/api/post/delete", { id: post.id });
+    });
     commentForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!commentInput.value.trim()) return;
@@ -240,34 +420,78 @@ function renderFeed() {
 
 function renderReels() {
   els.reelsList.innerHTML = "";
-  const reels = [...(state.data?.reels || [])].reverse();
+  const interestProfile = buildInterestProfile();
+  const reels = [...(state.data?.reels || [])].sort((left, right) => scoreExploreReel(right, interestProfile) - scoreExploreReel(left, interestProfile));
   if (!reels.length) {
     els.reelsList.innerHTML = empty("Henuz reels yok.");
     return;
   }
   reels.forEach((reel) => {
     const node = els.reelCardTemplate.content.firstElementChild.cloneNode(true);
+    node.dataset.reelId = reel.id;
     const likeButton = node.querySelector(".reel-like-button");
     const commentButton = node.querySelector(".reel-comment-button");
+    const shareButton = node.querySelector(".reel-share-button");
+    const audioButton = node.querySelector(".reel-audio-button");
     const commentsPanel = node.querySelector(".reel-comments-panel");
     const commentList = node.querySelector(".reel-comment-list");
     const commentForm = node.querySelector(".reel-comment-form");
     const commentInput = node.querySelector(".reel-comment-input");
-    node.querySelector(".reel-image").src = reel.media;
+    node.querySelector(".reel-media").innerHTML = createMediaMarkup(
+      reel.media,
+      reel.caption,
+      isVideoMedia(reel.media) ? "reel-video" : "reel-image",
+      reel.settings || {}
+    );
     node.querySelector(".reel-author").textContent = `@${reel.author}`;
-    node.querySelector(".reel-caption").textContent = reel.caption;
+    node.querySelector(".reel-caption").innerHTML = linkifyText(reel.caption);
+    node.querySelector(".reel-meta").textContent = [reel.music || "", reel.location || "", reel.coverText || ""]
+      .filter(Boolean)
+      .join(" - ");
     node.querySelector(".reel-comments-summary").textContent = (reel.comments || []).length
       ? `${reel.comments.length} yorum`
       : "Ilk yorumu sen ekle";
     node.querySelector(".reel-likes").textContent = `${(reel.likedBy || []).length} begeni`;
     node.querySelector(".reel-views").textContent = `${reel.views || 0} goruntuleme`;
+    node.querySelector(".reel-shares").textContent = `${reel.shares || 0} paylasim`;
+    node.querySelector(".reel-completion").textContent = `%${reel.completionRate || 0} tamamlama - ${reel.watchTime || 0} sn izleme`;
     commentList.innerHTML = (reel.comments || []).length
-      ? reel.comments.map((comment) => `<p><strong>@${comment.author}</strong> ${comment.text}</p>`).join("")
+      ? reel.comments.map((comment) => `<p><strong>@${comment.author}</strong> ${linkifyText(comment.text)}</p>`).join("")
       : empty("Henuz yorum yok.");
     likeButton.classList.toggle("liked", (reel.likedBy || []).includes(me().username));
     likeButton.textContent = (reel.likedBy || []).includes(me().username) ? "Begenildi" : "Begeni";
+    const reelVideo = node.querySelector(".reel-video");
+    if (reelVideo) {
+      reelVideo.playbackRate = Number(reel.settings?.speed || 100) / 100;
+      reelVideo.addEventListener(
+        "play",
+        async () => {
+          if (state.viewedReels.has(reel.id)) return;
+          state.viewedReels.add(reel.id);
+          await mutate("/api/reel/view", {
+            id: reel.id,
+            watchTime: Math.max(3, Number(reel.settings?.trimEnd || 15) - Number(reel.settings?.trimStart || 0)),
+            completionRate: 72
+          });
+        },
+        { once: true }
+      );
+    }
     likeButton.addEventListener("click", async () => mutate("/api/reel/like", { id: reel.id }));
     commentButton.addEventListener("click", () => commentsPanel.classList.toggle("hidden"));
+    shareButton.addEventListener("click", async () => {
+      const target = pickShareTarget(reel.author);
+      if (!target) return;
+      await mutate("/api/messages", {
+        username: target,
+        text: `@${reel.author} reels paylasti: ${reel.caption || reel.coverText || "Yeni reels"}`,
+        reelId: reel.id
+      });
+      setView("messages");
+    });
+    audioButton.addEventListener("click", () => {
+      window.alert(`Ses: ${reel.music || "Orijinal ses"}`);
+    });
     commentForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!commentInput.value.trim()) return;
@@ -275,6 +499,8 @@ function renderReels() {
     });
     els.reelsList.appendChild(node);
   });
+
+  setupAutoScrollReels();
 }
 
 function followLabel(account) {
@@ -285,7 +511,59 @@ function followLabel(account) {
 
 function renderExplore() {
   els.exploreGrid.innerHTML = "";
-  const list = (state.data?.users || []).filter((account) => account.username !== me().username);
+  if (els.exploreReelsGrid) els.exploreReelsGrid.innerHTML = "";
+  const interestProfile = buildInterestProfile();
+  const exploreReels = [...(state.data?.reels || [])]
+    .filter((reel) => isVideoMedia(reel.media))
+    .filter((reel) => !state.exploreQuery || matchesInterest(`${reel.caption} ${reel.music} ${reel.location} ${reel.coverText} ${reel.author}`, new Set([state.exploreQuery])))
+    .sort((left, right) => scoreExploreReel(right, interestProfile) - scoreExploreReel(left, interestProfile));
+
+  if (els.exploreReelsGrid) {
+    if (!exploreReels.length) {
+      els.exploreReelsGrid.innerHTML = empty("Aramana uygun video bulunamadi.");
+    } else {
+      exploreReels.slice(0, 12).forEach((reel) => {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "explore-reel-card";
+        card.innerHTML = `
+          <div class="explore-reel-media">${createMediaMarkup(reel.media, reel.caption, isVideoMedia(reel.media) ? "reel-video" : "reel-image", reel.settings || {})}</div>
+          <div class="explore-reel-overlay">
+            <strong>@${reel.author}</strong>
+            <span>${reel.music || "Orijinal ses"}</span>
+          </div>
+        `;
+        card.addEventListener("click", () => {
+          setView("reels");
+          const target = [...els.reelsList.querySelectorAll(".reel-card")].find((node) => node.dataset.reelId === reel.id);
+          target?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        els.exploreReelsGrid.appendChild(card);
+      });
+    }
+  }
+
+  if (els.friendMap) {
+    els.friendMap.innerHTML = "";
+    (state.data?.users || [])
+      .filter((account) => account.username !== me().username)
+      .slice(0, 6)
+      .forEach((account, index) => {
+        const pin = document.createElement("div");
+        pin.className = "friend-map-pin";
+        pin.style.left = `${18 + ((index * 17) % 70)}%`;
+        pin.style.top = `${20 + ((index * 19) % 58)}%`;
+        pin.innerHTML = `<div class="avatar gradient-avatar">${avatarMarkup(account)}</div><span>${account.lastLocation || account.username}</span>`;
+        els.friendMap.appendChild(pin);
+      });
+  }
+  const list = (state.data?.users || [])
+    .filter((account) => account.username !== me().username)
+    .sort((left, right) => {
+      const leftScore = ((left.followers || []).length * 2) + (matchesInterest(`${left.username} ${left.bio}`, interestProfile) ? 12 : 0);
+      const rightScore = ((right.followers || []).length * 2) + (matchesInterest(`${right.username} ${right.bio}`, interestProfile) ? 12 : 0);
+      return rightScore - leftScore;
+    });
   if (!list.length) {
     els.exploreGrid.innerHTML = empty("Baska kullanici yok.");
     return;
@@ -304,6 +582,22 @@ function renderExplore() {
     card.querySelector(".follow-button").addEventListener("click", async () => mutate("/api/follow", { username: account.username }));
     els.exploreGrid.appendChild(card);
   });
+}
+
+let reelAutoTimer = null;
+function setupAutoScrollReels() {
+  if (reelAutoTimer) clearInterval(reelAutoTimer);
+  if (!els.reelsList || state.data?.reels?.length < 2) return;
+  reelAutoTimer = setInterval(() => {
+    const cards = [...els.reelsList.querySelectorAll(".reel-card")];
+    if (!cards.length) return;
+    const current = cards.findIndex((card) => {
+      const rect = card.getBoundingClientRect();
+      return rect.top >= 0 && rect.top < window.innerHeight * 0.5;
+    });
+    const next = cards[(current + 1 + cards.length) % cards.length];
+    next?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 5000);
 }
 
 function renderNotifications() {
@@ -403,15 +697,30 @@ function renderProfile() {
   const reels = (state.data.reels || []).filter((reel) => reel.author === account.username);
   if (state.profileTab === "posts") {
     els.profileTabContent.innerHTML = posts.length
-      ? posts.map((post) => `<div class="profile-grid-item"><img src="${post.media}" alt="${post.title}" /><span>${account.displayName}</span></div>`).join("")
+      ? posts
+          .map(
+            (post) =>
+              `<div class="profile-grid-item">${createMediaMarkup(post.media, post.title, isVideoMedia(post.media) ? "reel-video" : "reel-image")}<span>${account.displayName}</span></div>`
+          )
+          .join("")
       : empty("Henuz gonderi yok.");
   } else if (state.profileTab === "reels") {
     els.profileTabContent.innerHTML = reels.length
-      ? reels.map((reel) => `<div class="profile-grid-item tall"><img src="${reel.media}" alt="${reel.caption}" /><span>Reel</span></div>`).join("")
+      ? reels
+          .map(
+            (reel) =>
+              `<div class="profile-grid-item tall">${createMediaMarkup(reel.media, reel.caption, isVideoMedia(reel.media) ? "reel-video" : "reel-image", reel.settings || {})}<span>${reel.music || "Reel"}</span></div>`
+          )
+          .join("")
       : empty("Henuz reels yok.");
   } else {
     els.profileTabContent.innerHTML = (state.data.taggedPosts || []).length
-      ? state.data.taggedPosts.map((post) => `<div class="profile-grid-item"><img src="${post.media}" alt="${post.title}" /><span>@${post.author}</span></div>`).join("")
+      ? state.data.taggedPosts
+          .map(
+            (post) =>
+              `<div class="profile-grid-item">${createMediaMarkup(post.media, post.title, isVideoMedia(post.media) ? "reel-video" : "reel-image")}<span>@${post.author}</span></div>`
+          )
+          .join("")
       : empty("Henuz etiket yok.");
   }
 }
@@ -419,6 +728,9 @@ function renderProfile() {
 function render() {
   applyAuthMode();
   if (!state.data?.me) return;
+  if (els.exploreSearchInput && document.activeElement !== els.exploreSearchInput) {
+    els.exploreSearchInput.value = state.exploreQuery;
+  }
   renderStories();
   renderFeed();
   renderReels();
@@ -479,9 +791,23 @@ els.composeForm.addEventListener("submit", async (event) => {
     title: els.composeTitle.value.trim(),
     caption: els.composeCaption.value.trim(),
     url: els.composeMedia.value.trim(),
-    dataUrl
+    dataUrl,
+    music: els.reelMusic.value.trim(),
+    location: els.reelLocation.value.trim(),
+    coverText: els.reelCoverText.value.trim(),
+    reelSettings: {
+      filter: els.reelFilter.value,
+      brightness: els.reelBrightness.value,
+      contrast: els.reelContrast.value,
+      saturation: els.reelSaturation.value,
+      voiceMode: els.reelVoiceMode.value,
+      speed: els.reelSpeed.value,
+      trimStart: els.reelTrimStart.value,
+      trimEnd: els.reelTrimEnd.value
+    }
   });
   els.composeForm.reset();
+  syncEditorPreview();
   setView(state.composeType === "reel" ? "reels" : "home");
 });
 
@@ -502,8 +828,11 @@ els.settingsForm.addEventListener("submit", async (event) => {
     displayName: els.settingsDisplayName.value.trim(),
     bio: els.settingsBio.value.trim(),
     avatar: els.settingsAvatar.value.trim(),
+    dataUrl: await fileToDataUrl(els.settingsAvatarFile.files[0]),
+    lastLocation: els.reelLocation.value.trim(),
     privateAccount: els.settingsPrivate.checked
   });
+  els.settingsAvatarFile.value = "";
   setView("profile");
 });
 
@@ -526,6 +855,7 @@ document.querySelectorAll("[data-compose-type]").forEach((button) => {
     document.querySelectorAll("[data-compose-type]").forEach((chip) => {
       chip.classList.toggle("active", chip.dataset.composeType === state.composeType);
     });
+    syncEditorPreview();
   });
 });
 document.querySelectorAll("[data-auth-mode]").forEach((button) => {
@@ -546,3 +876,27 @@ document.querySelectorAll("[data-target='settings']").forEach((button) => {
 
 applyAuthMode();
 bootstrap();
+state.interestTerms = loadInterestTerms();
+[
+  els.composeTitle,
+  els.composeMedia,
+  els.composeFile,
+  els.reelMusic,
+  els.reelLocation,
+  els.reelCoverText,
+  els.reelFilter,
+  els.reelBrightness,
+  els.reelContrast,
+  els.reelSaturation,
+  els.reelVoiceMode,
+  els.reelSpeed
+].forEach((input) => {
+  input?.addEventListener("input", syncEditorPreview);
+  input?.addEventListener("change", syncEditorPreview);
+});
+els.exploreSearchInput?.addEventListener("input", (event) => {
+  state.exploreQuery = event.target.value.trim().toLowerCase();
+  saveInterestTerm(state.exploreQuery);
+  renderExplore();
+});
+syncEditorPreview();
