@@ -54,6 +54,7 @@ function Public-User($user) {
     displayName = $user.displayName
     bio = $user.bio
     avatar = $user.avatar
+    lastLocation = $user.lastLocation
     privateAccount = [bool]$user.privateAccount
     followers = @($user.followers)
     following = @($user.following)
@@ -331,7 +332,23 @@ while ($true) {
       $media = Save-Upload $body
       if ([string]::IsNullOrWhiteSpace($media)) { Send-Json $client 400 @{ error = "media_required" }; continue }
       if ($body.type -eq "reel") {
-        $db.reels += @{ id = New-Id "reel"; author = $viewer.username; caption = if ($body.caption) { $body.caption } else { $body.title }; media = $media; likedBy = @(); views = 0; comments = @() }
+        $db.reels += @{
+          id = New-Id "reel"
+          author = $viewer.username
+          caption = if ($body.caption) { $body.caption } else { $body.title }
+          media = $media
+          likedBy = @()
+          views = 0
+          comments = @()
+          music = "$($body.music)"
+          location = "$($body.location)"
+          coverText = "$($body.coverText)"
+          settings = $body.reelSettings
+          shares = 0
+          watchTime = 0
+          completionRate = 0
+        }
+        if ($body.location) { $viewer.lastLocation = "$($body.location)" }
       } elseif ($body.type -eq "story") {
         $db.stories = @($db.stories | Where-Object { -not ($_.owner -eq $viewer.username -and $_.placeholder) })
         $db.stories = @(@{ id = New-Id "story"; owner = $viewer.username; image = $media; caption = if ($body.caption) { $body.caption } else { $body.title } }) + @($db.stories)
@@ -413,6 +430,16 @@ while ($true) {
       continue
     }
 
+    if ($request.Path -eq "/api/post/delete" -and $request.Method -eq "POST") {
+      $post = $db.posts | Where-Object { $_.id -eq $body.id } | Select-Object -First 1
+      if ($null -eq $post) { Send-Json $client 404 @{ error = "not_found" }; continue }
+      if ($post.author -ne $viewer.username) { Send-Json $client 403 @{ error = "forbidden" }; continue }
+      $db.posts = @($db.posts | Where-Object { $_.id -ne $body.id })
+      Save-Db $db
+      Send-Json $client 200 (Build-Bootstrap $db $viewer)
+      continue
+    }
+
     if ($request.Path -eq "/api/reel/like" -and $request.Method -eq "POST") {
       $reel = $db.reels | Where-Object { $_.id -eq $body.id } | Select-Object -First 1
       if ($null -eq $reel) { Send-Json $client 404 @{ error = "not_found" }; continue }
@@ -438,11 +465,27 @@ while ($true) {
       continue
     }
 
+    if ($request.Path -eq "/api/reel/view" -and $request.Method -eq "POST") {
+      $reel = $db.reels | Where-Object { $_.id -eq $body.id } | Select-Object -First 1
+      if ($null -eq $reel) { Send-Json $client 404 @{ error = "not_found" }; continue }
+      $reel.views = [int]($reel.views) + 1
+      $reel.watchTime = [int]($reel.watchTime) + [int]$body.watchTime
+      $completion = [Math]::Max(0, [Math]::Min(100, [int]$body.completionRate))
+      $reel.completionRate = [int](($reel.completionRate + $completion) / 2)
+      Save-Db $db
+      Send-Json $client 200 (Build-Bootstrap $db $viewer)
+      continue
+    }
+
     if ($request.Path -eq "/api/messages" -and $request.Method -eq "POST") {
       $conversation = Ensure-Conversation $db $viewer.username $body.username
       if ($body.text) {
         $conversation.messages += @{ id = New-Id "message"; sender = $viewer.username; text = $body.text; time = "Simdi" }
         Add-Notification $db $body.username $viewer.username "sana mesaj gonderdi."
+        if ($body.reelId) {
+          $reel = $db.reels | Where-Object { $_.id -eq $body.reelId } | Select-Object -First 1
+          if ($null -ne $reel) { $reel.shares = [int]$reel.shares + 1 }
+        }
       }
       Save-Db $db
       Send-Json $client 200 (Build-Bootstrap $db $viewer)
@@ -450,9 +493,11 @@ while ($true) {
     }
 
     if ($request.Path -eq "/api/profile" -and $request.Method -eq "POST") {
+      $uploadedAvatar = Save-Upload $body
       $viewer.displayName = $body.displayName
       $viewer.bio = $body.bio
-      $viewer.avatar = $body.avatar
+      $viewer.avatar = if ($uploadedAvatar) { $uploadedAvatar } else { $body.avatar }
+      if ($body.lastLocation) { $viewer.lastLocation = $body.lastLocation }
       $viewer.privateAccount = [bool]$body.privateAccount
       Save-Db $db
       Send-Json $client 200 (Build-Bootstrap $db $viewer)
