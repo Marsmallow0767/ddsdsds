@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const https = require("https");
 const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
@@ -10,6 +11,9 @@ const dataDir = path.join(root, "data");
 const uploadDir = path.join(root, "uploads");
 const dbPath = path.join(dataDir, "db.json");
 const port = Number(process.env.PORT || 8080);
+const captchaSecret = process.env.CAPTCHA_SECRET || "denizstagram-captcha-secret";
+const resendApiKey = process.env.RESEND_API_KEY || "";
+const emailFrom = process.env.EMAIL_FROM || "";
 
 const initialDb = {
   users: [],
@@ -19,7 +23,8 @@ const initialDb = {
   taggedPosts: [],
   notifications: [],
   conversations: [],
-  sessions: {}
+  sessions: {},
+  pendingEmailVerifications: []
 };
 
 function makeId(prefix) {
@@ -28,6 +33,98 @@ function makeId(prefix) {
 
 function hashPassword(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function makeCaptchaCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+}
+
+function signCaptcha(token, code) {
+  return crypto.createHmac("sha256", captchaSecret).update(`${token}:${`${code}`.trim().toUpperCase()}`).digest("hex");
+}
+
+function sameToken(left, right) {
+  const a = Buffer.from(`${left || ""}`);
+  const b = Buffer.from(`${right || ""}`);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function buildCaptchaImage(code) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="180" height="64" viewBox="0 0 180 64">
+      <rect width="180" height="64" rx="14" fill="#f7f2ea"/>
+      <path d="M8 45 C35 8, 70 60, 100 18 S150 5, 172 38" stroke="#ff8a3d" stroke-width="5" fill="none" opacity="0.45"/>
+      <path d="M10 14 C45 52, 72 2, 108 36 S154 63, 170 16" stroke="#1d3b53" stroke-width="4" fill="none" opacity="0.35"/>
+      <text x="90" y="42" text-anchor="middle" font-family="Verdana" font-size="28" font-weight="700" letter-spacing="6" fill="#222">${code}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function captchaExpired(token) {
+  const issuedAt = Number(`${token || ""}`.split(".")[0]);
+  return !issuedAt || Date.now() - issuedAt > 10 * 60 * 1000;
+}
+
+function validateHumanCheck(body) {
+  if (!body || body.notRobot !== true) return "human_check_required";
+  if (`${body.website || ""}`.trim()) return "bot_detected";
+  if (Number(body.humanDelayMs || 0) < 1500) return "human_check_too_fast";
+  if (!body.captchaToken || !body.captchaSignature || !body.captchaInput) return "captcha_required";
+  if (captchaExpired(body.captchaToken)) return "captcha_expired";
+  if (!sameToken(body.captchaSignature, signCaptcha(body.captchaToken, body.captchaInput))) return "captcha_invalid";
+  return null;
+}
+
+function createCaptchaPayload() {
+  const token = `${Date.now()}.${makeId("captcha")}`;
+  const code = makeCaptchaCode();
+  return {
+    token,
+    image: buildCaptchaImage(code),
+    signature: signCaptcha(token, code)
+  };
+}
+
+function makeEmailCode() {
+  return `${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+async function sendVerificationEmail(email, code) {
+  if (!resendApiKey || !emailFrom) throw new Error("email_service_unavailable");
+  const payload = JSON.stringify({
+    from: emailFrom,
+    to: [email],
+    subject: "Denizstagram dogrulama kodu",
+    html: `<p>Kayit kodun: <strong>${code}</strong></p><p>Bu kod 10 dakika gecerli.</p>`
+  });
+  await new Promise((resolve, reject) => {
+    const req = https.request(
+      "https://api.resend.com/emails",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload)
+        }
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) resolve(data);
+          else reject(new Error("email_service_unavailable"));
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
 async function ensureStorage() {
@@ -220,13 +317,53 @@ async function saveUpload(body) {
 async function handleApi(req, res, pathname) {
   const db = await readDb();
 
+  if (pathname === "/api/auth/captcha" && req.method === "GET") {
+    return sendJson(res, 200, createCaptchaPayload());
+  }
+
+  if (pathname === "/api/auth/send-email-code" && req.method === "POST") {
+    const body = await readBody(req);
+    const email = `${body.email || ""}`.trim().toLowerCase();
+    if (!email) return sendJson(res, 400, { error: "email_required" });
+    const humanCheckError = validateHumanCheck(body);
+    if (humanCheckError) return sendJson(res, 400, { error: humanCheckError });
+    const code = makeEmailCode();
+    const verificationToken = makeId("emailverify");
+    await sendVerificationEmail(email, code);
+    db.pendingEmailVerifications = (db.pendingEmailVerifications || []).filter(
+      (item) => item.email !== email && item.token !== verificationToken
+    );
+    db.pendingEmailVerifications.push({
+      token: verificationToken,
+      email,
+      codeHash: hashPassword(code),
+      expiresAt: Date.now() + 10 * 60 * 1000
+    });
+    await saveDb(db);
+    return sendJson(res, 200, { ok: true, verificationToken });
+  }
+
   if (pathname === "/api/register" && req.method === "POST") {
     const body = await readBody(req);
     const username = `${body.username || ""}`.trim().toLowerCase();
+    const email = `${body.email || ""}`.trim().toLowerCase();
     if (!username || !body.password) return sendJson(res, 400, { error: "invalid_input" });
+    if (!email) return sendJson(res, 400, { error: "email_required" });
+    const humanCheckError = validateHumanCheck(body);
+    if (humanCheckError) return sendJson(res, 400, { error: humanCheckError });
+    const verification = (db.pendingEmailVerifications || []).find(
+      (item) => item.token === body.emailVerificationToken && item.email === email
+    );
+    if (!verification || !body.emailCode) return sendJson(res, 400, { error: "email_verification_required" });
+    if (verification.expiresAt < Date.now()) return sendJson(res, 400, { error: "email_verification_required" });
+    if (verification.codeHash !== hashPassword(body.emailCode || "")) {
+      return sendJson(res, 400, { error: "email_verification_invalid" });
+    }
     if (findUser(db, username)) return sendJson(res, 409, { error: "username_taken" });
     db.users.push({
       username,
+      email,
+      emailVerified: true,
       displayName: body.displayName || username,
       passwordHash: hashPassword(body.password),
       bio: "",
@@ -236,6 +373,7 @@ async function handleApi(req, res, pathname) {
       following: [],
       followRequests: []
     });
+    db.pendingEmailVerifications = (db.pendingEmailVerifications || []).filter((item) => item.token !== verification.token);
     await saveDb(db);
     return sendJson(res, 200, { ok: true });
   }
@@ -243,6 +381,8 @@ async function handleApi(req, res, pathname) {
   if (pathname === "/api/login" && req.method === "POST") {
     const body = await readBody(req);
     const username = `${body.username || ""}`.trim().toLowerCase();
+    const humanCheckError = validateHumanCheck(body);
+    if (humanCheckError) return sendJson(res, 400, { error: humanCheckError });
     const viewer = findUser(db, username);
     if (!viewer || viewer.passwordHash !== hashPassword(body.password || "")) {
       return sendJson(res, 401, { error: "invalid_credentials" });
