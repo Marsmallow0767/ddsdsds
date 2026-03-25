@@ -5,6 +5,9 @@ $dataDir = Join-Path $root "data"
 $uploadDir = Join-Path $root "uploads"
 $dbPath = Join-Path $dataDir "db.json"
 $port = 8080
+$captchaSecret = if ($env:CAPTCHA_SECRET) { $env:CAPTCHA_SECRET } else { "denizstagram-captcha-secret" }
+$resendApiKey = "$($env:RESEND_API_KEY)"
+$emailFrom = "$($env:EMAIL_FROM)"
 
 function Ensure-Storage {
   if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
@@ -19,6 +22,7 @@ function Ensure-Storage {
       notifications = @()
       conversations = @()
       sessions = @{}
+      pendingEmailVerifications = @()
     } | ConvertTo-Json -Depth 20 | Set-Content -Path $dbPath -Encoding UTF8
   }
 }
@@ -31,6 +35,78 @@ function Hash-Password([string]$value) {
   $bytes = [Text.Encoding]::UTF8.GetBytes($value)
   $hashBytes = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
   ([BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+}
+
+function New-CaptchaCode {
+  $alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".ToCharArray()
+  -join (1..5 | ForEach-Object { $alphabet[(Get-Random -Minimum 0 -Maximum $alphabet.Length)] })
+}
+
+function Sign-Captcha([string]$token, [string]$code) {
+  $hmac = [Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($captchaSecret))
+  $bytes = [Text.Encoding]::UTF8.GetBytes("$token:$($code.Trim().ToUpperInvariant())")
+  ([BitConverter]::ToString($hmac.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+}
+
+function New-CaptchaImage([string]$code) {
+  $svg = @"
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="64" viewBox="0 0 180 64">
+  <rect width="180" height="64" rx="14" fill="#f7f2ea"/>
+  <path d="M8 45 C35 8, 70 60, 100 18 S150 5, 172 38" stroke="#ff8a3d" stroke-width="5" fill="none" opacity="0.45"/>
+  <path d="M10 14 C45 52, 72 2, 108 36 S154 63, 170 16" stroke="#1d3b53" stroke-width="4" fill="none" opacity="0.35"/>
+  <text x="90" y="42" text-anchor="middle" font-family="Verdana" font-size="28" font-weight="700" letter-spacing="6" fill="#222">$code</text>
+</svg>
+"@
+  "data:image/svg+xml;utf8,$([uri]::EscapeDataString($svg))"
+}
+
+function New-CaptchaPayload {
+  $token = "$(Get-Date -UFormat %s000).$(New-Id 'captcha')"
+  $code = New-CaptchaCode
+  @{
+    token = $token
+    image = New-CaptchaImage $code
+    signature = Sign-Captcha $token $code
+  }
+}
+
+function Test-CaptchaExpired([string]$token) {
+  $issuedAt = [long]("$token".Split('.')[0])
+  if ($issuedAt -le 0) { return $true }
+  (([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) - $issuedAt) -gt 600000
+}
+
+function Test-HumanCheck($body) {
+  if (-not [bool]$body.notRobot) { return "human_check_required" }
+  if (-not [string]::IsNullOrWhiteSpace("$($body.website)")) { return "bot_detected" }
+  if ([int]$body.humanDelayMs -lt 1500) { return "human_check_too_fast" }
+  if ([string]::IsNullOrWhiteSpace("$($body.captchaToken)") -or [string]::IsNullOrWhiteSpace("$($body.captchaSignature)") -or [string]::IsNullOrWhiteSpace("$($body.captchaInput)")) { return "captcha_required" }
+  if (Test-CaptchaExpired "$($body.captchaToken)") { return "captcha_expired" }
+  if ((Sign-Captcha "$($body.captchaToken)" "$($body.captchaInput)") -ne "$($body.captchaSignature)") { return "captcha_invalid" }
+  return $null
+}
+
+function New-EmailCode {
+  Get-Random -Minimum 100000 -Maximum 999999
+}
+
+function Send-VerificationEmail([string]$email, [string]$code) {
+  if ([string]::IsNullOrWhiteSpace($resendApiKey) -or [string]::IsNullOrWhiteSpace($emailFrom)) {
+    throw "email_service_unavailable"
+  }
+  $payload = @{
+    from = $emailFrom
+    to = @($email)
+    subject = "Denizstagram dogrulama kodu"
+    html = "<p>Kayit kodun: <strong>$code</strong></p><p>Bu kod 10 dakika gecerli.</p>"
+  } | ConvertTo-Json -Depth 5
+  try {
+    Invoke-RestMethod -Uri "https://api.resend.com/emails" -Method Post -Headers @{
+      Authorization = "Bearer $resendApiKey"
+    } -ContentType "application/json" -Body $payload | Out-Null
+  } catch {
+    throw "email_service_unavailable"
+  }
 }
 
 function Get-BodyObject([string]$body) {
@@ -282,10 +358,20 @@ while ($true) {
 
     if ($request.Path -eq "/api/register" -and $request.Method -eq "POST") {
       $username = "$($body.username)".ToLowerInvariant().Trim()
+      $email = "$($body.email)".ToLowerInvariant().Trim()
       if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrWhiteSpace($body.password)) { Send-Json $client 400 @{ error = "invalid_input" }; continue }
+      if ([string]::IsNullOrWhiteSpace($email)) { Send-Json $client 400 @{ error = "email_required" }; continue }
+      $humanCheckError = Test-HumanCheck $body
+      if ($humanCheckError) { Send-Json $client 400 @{ error = $humanCheckError }; continue }
+      $verification = @($db.pendingEmailVerifications) | Where-Object { $_.token -eq "$($body.emailVerificationToken)" -and $_.email -eq $email } | Select-Object -First 1
+      if ($null -eq $verification -or [string]::IsNullOrWhiteSpace("$($body.emailCode)")) { Send-Json $client 400 @{ error = "email_verification_required" }; continue }
+      if ([long]$verification.expiresAt -lt ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())) { Send-Json $client 400 @{ error = "email_verification_required" }; continue }
+      if ($verification.codeHash -ne (Hash-Password "$($body.emailCode)")) { Send-Json $client 400 @{ error = "email_verification_invalid" }; continue }
       if (Find-User $db $username) { Send-Json $client 409 @{ error = "username_taken" }; continue }
       $db.users += @{
         username = $username
+        email = $email
+        emailVerified = $true
         displayName = if ($body.displayName) { $body.displayName } else { $username }
         passwordHash = Hash-Password $body.password
         bio = ""
@@ -295,6 +381,7 @@ while ($true) {
         following = @()
         followRequests = @()
       }
+      $db.pendingEmailVerifications = @($db.pendingEmailVerifications | Where-Object { $_.token -ne $verification.token })
       Save-Db $db
       Send-Json $client 200 @{ ok = $true }
       continue
@@ -302,12 +389,43 @@ while ($true) {
 
     if ($request.Path -eq "/api/login" -and $request.Method -eq "POST") {
       $username = "$($body.username)".ToLowerInvariant().Trim()
+      $humanCheckError = Test-HumanCheck $body
+      if ($humanCheckError) { Send-Json $client 400 @{ error = $humanCheckError }; continue }
       $viewer = Find-User $db $username
       if ($null -eq $viewer -or $viewer.passwordHash -ne (Hash-Password $body.password)) { Send-Json $client 401 @{ error = "invalid_credentials" }; continue }
       $token = New-Id "sess"
       $db.sessions | Add-Member -NotePropertyName $token -NotePropertyValue $viewer.username
       Save-Db $db
       Send-Json $client 200 @{ ok = $true } @{ "Set-Cookie" = "ds_session=$token; Path=/; HttpOnly" }
+      continue
+    }
+
+    if ($request.Path -eq "/api/auth/captcha" -and $request.Method -eq "GET") {
+      Send-Json $client 200 (New-CaptchaPayload)
+      continue
+    }
+
+    if ($request.Path -eq "/api/auth/send-email-code" -and $request.Method -eq "POST") {
+      $email = "$($body.email)".ToLowerInvariant().Trim()
+      if ([string]::IsNullOrWhiteSpace($email)) { Send-Json $client 400 @{ error = "email_required" }; continue }
+      $humanCheckError = Test-HumanCheck $body
+      if ($humanCheckError) { Send-Json $client 400 @{ error = $humanCheckError }; continue }
+      try {
+        $code = "$(New-EmailCode)"
+        $verificationToken = New-Id "emailverify"
+        Send-VerificationEmail $email $code
+        $db.pendingEmailVerifications = @($db.pendingEmailVerifications | Where-Object { $_.email -ne $email -and $_.token -ne $verificationToken })
+        $db.pendingEmailVerifications += @{
+          token = $verificationToken
+          email = $email
+          codeHash = Hash-Password $code
+          expiresAt = ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + 600000)
+        }
+        Save-Db $db
+        Send-Json $client 200 @{ ok = $true; verificationToken = $verificationToken }
+      } catch {
+        Send-Json $client 400 @{ error = "$($_.Exception.Message)" }
+      }
       continue
     }
 
